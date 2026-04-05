@@ -41,7 +41,10 @@ runs:
       run: |
         VERSION="${{ inputs.swift-version }}"
         PKG="swift-${VERSION}-RELEASE-osx.pkg"
-        curl -sLO "https://download.swift.org/swift-${VERSION}-release/xcode/${PKG%.pkg}/${PKG}"
+        URL="https://download.swift.org/swift-${VERSION}-release/xcode/${PKG%.pkg}/${PKG}"
+        echo "Downloading ${URL}"
+        curl -fLO "${URL}"
+        ls -la "${PKG}"
         sudo installer -pkg "${PKG}" -target /
         TOOLCHAIN_BIN="/Library/Developer/Toolchains/swift-${VERSION}-RELEASE.xctoolchain/usr/bin"
         echo "${TOOLCHAIN_BIN}" >> $GITHUB_PATH
