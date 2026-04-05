@@ -41,7 +41,8 @@ runs:
       run: |
         VERSION="${{ inputs.swift-version }}"
         PKG="swift-${VERSION}-RELEASE-osx.pkg"
-        URL="https://download.swift.org/swift-${VERSION}-release/xcode/${PKG%.pkg}/${PKG}"
+        TAG="swift-${VERSION}-RELEASE"
+        URL="https://download.swift.org/swift-${VERSION}-release/xcode/${TAG}/${PKG}"
         echo "Downloading ${URL}"
         curl -fLO "${URL}"
         ls -la "${PKG}"
