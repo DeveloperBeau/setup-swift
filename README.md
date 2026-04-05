@@ -9,7 +9,7 @@ If Swift is already present at the requested version (e.g. inside a Swift Docker
 ```yaml
 steps:
   - uses: actions/checkout@v4
-  - uses: beauayres/setup-swift@v1
+  - uses: DeveloperBeau/setup-swift@v1
     with:
       swift-version: '6.3'  # optional, defaults to 6.3
   - run: swift build
@@ -30,7 +30,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
-      - uses: beauayres/setup-swift@v1
+      - uses: DeveloperBeau/setup-swift@v1
       - run: swift build -v
       - run: swift test -v
 ```
@@ -47,7 +47,7 @@ jobs:
       image: swift:6.3
     steps:
       - uses: actions/checkout@v4
-      - uses: beauayres/setup-swift@v1  # detects Swift 6.3, skips install
+      - uses: DeveloperBeau/setup-swift@v1  # detects Swift 6.3, skips install
       - run: swift build
 ```
 
