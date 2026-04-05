@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Swift ${{ matrix.swift }} on ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS
+            runner: macos-latest
+            swift: '6.3'
+          - name: Linux
+            runner: ubuntu-24.04
+            swift: '6.3'
+          - name: Windows
+            runner: windows-latest
+            swift: '6.3'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./
+        with:
+          swift-version: ${{ matrix.swift }}
+      - name: Smoke test
+        shell: bash
+        run: |
+          swift --version
+          echo 'print("Hello from Swift on ${{ matrix.name }}")' > /tmp/hello.swift
+          swift /tmp/hello.swift

@@ -1,0 +1,121 @@
+name: 'Setup Swift'
+description: 'Install a specific Swift version on macOS, Linux, or Windows. Skips installation if the correct version is already present.'
+
+branding:
+  icon: 'download'
+  color: 'orange'
+
+inputs:
+  swift-version:
+    description: 'Swift version to install (e.g. 6.3)'
+    required: false
+    default: '6.3'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Check existing Swift version
+      id: check
+      shell: bash
+      run: |
+        WANTED="${{ inputs.swift-version }}"
+        if command -v swift &>/dev/null; then
+          CURRENT="$(swift --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1)"
+          CURRENT_MINOR="${CURRENT%.*}"
+          # Handle x.y.z -> x.y comparison when wanted is x.y
+          if [[ "$CURRENT" == "$WANTED" ]] || [[ "$CURRENT_MINOR" == "$WANTED" ]]; then
+            echo "Swift $CURRENT already installed (wanted $WANTED)"
+            echo "skip=true" >> $GITHUB_OUTPUT
+            exit 0
+          else
+            echo "Swift $CURRENT found but $WANTED wanted — installing"
+          fi
+        else
+          echo "Swift not found — installing $WANTED"
+        fi
+        echo "skip=false" >> $GITHUB_OUTPUT
+
+    - name: Install Swift (macOS)
+      if: runner.os == 'macOS' && steps.check.outputs.skip != 'true'
+      shell: bash
+      run: |
+        VERSION="${{ inputs.swift-version }}"
+        PKG="swift-${VERSION}-RELEASE-osx.pkg"
+        curl -sLO "https://download.swift.org/swift-${VERSION}-release/xcode/${PKG%.pkg}/${PKG}"
+        sudo installer -pkg "${PKG}" -target /
+        TOOLCHAIN_BIN="/Library/Developer/Toolchains/swift-${VERSION}-RELEASE.xctoolchain/usr/bin"
+        echo "${TOOLCHAIN_BIN}" >> $GITHUB_PATH
+        echo "TOOLCHAINS=swift" >> $GITHUB_ENV
+
+    - name: Install Swift (Linux)
+      if: runner.os == 'Linux' && steps.check.outputs.skip != 'true'
+      shell: bash
+      run: |
+        VERSION="${{ inputs.swift-version }}"
+
+        # Detect distro
+        . /etc/os-release
+        UBUNTU_VERSION="${VERSION_ID}"
+        UBUNTU_SUFFIX="ubuntu${UBUNTU_VERSION//./}"
+
+        # Install Swift runtime dependencies
+        export DEBIAN_FRONTEND=noninteractive
+        sudo apt-get update -q
+        sudo apt-get install -y -q \
+          binutils libc6-dev libcurl4-openssl-dev libedit2 \
+          libgcc-s1 libpython3-dev libsqlite3-0 \
+          libstdc++-13-dev libxml2-dev libz3-dev pkg-config \
+          tzdata unzip zlib1g-dev
+
+        # Download and extract tarball
+        TARBALL="swift-${VERSION}-RELEASE-ubuntu${UBUNTU_VERSION}.tar.gz"
+        curl -sLO "https://download.swift.org/swift-${VERSION}-release/${UBUNTU_SUFFIX}/swift-${VERSION}-RELEASE/${TARBALL}"
+        sudo mkdir -p /opt/swift
+        sudo tar xzf "${TARBALL}" -C /opt/swift --strip-components=1
+        echo "/opt/swift/usr/bin" >> $GITHUB_PATH
+
+    - name: Install Visual Studio components (Windows)
+      if: runner.os == 'Windows' && steps.check.outputs.skip != 'true'
+      shell: pwsh
+      run: |
+        winget install --id Microsoft.VisualStudio.2022.Community --exact --force `
+          --custom "--add Microsoft.VisualStudio.Component.Windows11SDK.22000 --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64" `
+          --source winget --accept-source-agreements --accept-package-agreements
+
+    - name: Install Swift (Windows)
+      if: runner.os == 'Windows' && steps.check.outputs.skip != 'true'
+      shell: pwsh
+      run: |
+        winget install --id Swift.Toolchain -e --source winget `
+          --accept-source-agreements --accept-package-agreements
+
+        # Refresh PATH from registry
+        $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + `
+                     [System.Environment]::GetEnvironmentVariable("Path","User")
+        $env:Path -split ';' | Where-Object { $_ -like '*Swift*' } |
+          ForEach-Object { $_ | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append }
+
+        # Locate and set Windows SDK root
+        $sdk = Get-ChildItem "$env:LocalAppData\Programs\Swift\Platforms" `
+                 -Recurse -Filter "Windows.sdk" -Directory -ErrorAction SilentlyContinue |
+                 Select-Object -First 1
+        if ($sdk) {
+          "SDKROOT=$($sdk.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+        } else {
+          Write-Error "Windows.sdk not found after Swift install"
+          Get-ChildItem "$env:LocalAppData\Programs\Swift" -Recurse -Directory -Depth 3 |
+            ForEach-Object { Write-Host $_.FullName }
+          exit 1
+        }
+
+    - name: Verify Swift
+      shell: bash
+      run: |
+        swift --version
+        INSTALLED="$(swift --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1)"
+        WANTED="${{ inputs.swift-version }}"
+        INSTALLED_MINOR="${INSTALLED%.*}"
+        if [[ "$INSTALLED" != "$WANTED" ]] && [[ "$INSTALLED_MINOR" != "$WANTED" ]]; then
+          echo "::error::Expected Swift $WANTED but got $INSTALLED"
+          exit 1
+        fi
