@@ -98,9 +98,9 @@ This repository tests the action against the following combinations on every pus
 
 | Platform | Runner | Swift versions tested |
 |----------|--------|-----------------------|
-| macOS | `macos-latest` | `latest`, `6.3`, `5` |
-| Linux | `ubuntu-latest` | `latest`, `6.3`, `6` |
-| Windows | `windows-latest` | `latest`, `6.3`, `6` |
+| macOS | `macos-latest` | `latest`, `6.2.4` (exact), `5` (partial major) |
+| Linux | `ubuntu-latest` | `latest`, `6.2.4` (exact), `6` (partial major) |
+| Windows | `windows-latest` | `latest`, `6.2.4` (exact), `6` (partial major) |
 
 ### Why no Swift 5 on Linux or Windows?
 
