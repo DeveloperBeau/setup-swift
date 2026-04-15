@@ -8,16 +8,21 @@ on:
 
 jobs:
   test:
-    name: Swift ${{ matrix.swift }} on ${{ matrix.os.name }}
-    runs-on: ${{ matrix.os.runner }}
+    name: Swift ${{ matrix.swift }} on ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
-        swift: ['latest', '5', '6.3']
-        os:
-          - { name: macOS, runner: macos-latest }
-          - { name: Linux, runner: ubuntu-24.04 }
-          - { name: Windows, runner: windows-latest }
+        include:
+          - name: macOS
+            runner: macos-latest
+            swift: '5'
+          - name: Linux
+            runner: ubuntu-latest
+            swift: '6'
+          - name: Windows
+            runner: windows-latest
+            swift: '6'
     steps:
       - uses: actions/checkout@v4
       - id: setup
@@ -34,7 +39,7 @@ jobs:
           if [[ -z "$RESOLVED" ]]; then
             echo "::error::version output is empty"; exit 1
           fi
-          if [[ "$INPUT" != "latest" ]] && [[ "$RESOLVED" != "$INPUT"* ]]; then
+          if [[ "$RESOLVED" != "$INPUT"* ]]; then
             echo "::error::Resolved '$RESOLVED' doesn't match input '$INPUT'"; exit 1
           fi
       - name: Smoke test
