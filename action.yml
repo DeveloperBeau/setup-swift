@@ -41,13 +41,13 @@ runs:
         JSON="$(curl -fsSL https://www.swift.org/api/v1/install/releases.json)"
 
         if [[ "$INPUT" == "latest" ]]; then
-          FILTER='.[].name'
+          RESOLVED="$(echo "$JSON" | jq -r '.[].name' | sort -V | tail -1)"
         else
-          # Anchored prefix match: "6" matches "6.x" or "6", not "60.x"
-          FILTER=".[] | select(.name | test(\"^${INPUT//./\\.}(\\\\.|$)\")) | .name"
+          # Anchored prefix match: "6" matches "6" or "6.x", not "60.x"
+          RESOLVED="$(echo "$JSON" | jq -r --arg v "$INPUT" \
+            '.[] | select(.name == $v or (.name | startswith($v + "."))) | .name' \
+            | sort -V | tail -1)"
         fi
-
-        RESOLVED="$(echo "$JSON" | jq -r "$FILTER" | sort -V | tail -1)"
 
         if [[ -z "$RESOLVED" ]]; then
           echo "::error::No Swift release matches '$INPUT'"
