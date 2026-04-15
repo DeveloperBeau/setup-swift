@@ -39,7 +39,14 @@ jobs:
           if [[ -z "$RESOLVED" ]]; then
             echo "::error::version output is empty"; exit 1
           fi
-          if [[ "$INPUT" != "latest" ]] && [[ "$RESOLVED" != "$INPUT"* ]]; then
+          if [[ "$INPUT" == "latest" ]]; then
+            EXPECTED="$(curl -fsSL https://www.swift.org/api/v1/install/releases.json \
+              | jq -r '.[].name' | sort -V | tail -1)"
+            if [[ "$RESOLVED" != "$EXPECTED" ]]; then
+              echo "::error::'latest' resolved to '$RESOLVED' but swift.org API says '$EXPECTED'"
+              exit 1
+            fi
+          elif [[ "$RESOLVED" != "$INPUT"* ]]; then
             echo "::error::Resolved '$RESOLVED' doesn't match input '$INPUT'"; exit 1
           fi
       - name: Smoke test
