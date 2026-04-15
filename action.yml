@@ -7,29 +7,70 @@ branding:
 
 inputs:
   swift-version:
-    description: 'Swift version to install (e.g. 6.3)'
+    description: 'Swift version to install. Accepts exact (6.3.0), partial (6, 6.3), or "latest".'
     required: false
-    default: '6.3'
+    default: 'latest'
+  skip-verify-signature:
+    description: 'Skip GPG/pkg signature verification.'
+    required: false
+    default: 'false'
+
+outputs:
+  version:
+    description: 'Fully-resolved Swift version that was installed (e.g. 6.3).'
+    value: ${{ steps.resolve.outputs.version }}
 
 runs:
   using: 'composite'
   steps:
+    - name: Resolve Swift version
+      id: resolve
+      shell: bash
+      run: |
+        set -euo pipefail
+        INPUT="${{ inputs.swift-version }}"
+
+        # Exact x.y.z — no API call
+        if [[ "$INPUT" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo "Input is exact version: $INPUT"
+          echo "version=$INPUT" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        echo "Resolving '$INPUT' via swift.org API"
+        JSON="$(curl -fsSL https://www.swift.org/api/v1/install/releases.json)"
+
+        if [[ "$INPUT" == "latest" ]]; then
+          RESOLVED="$(echo "$JSON" | jq -r '.[].name' | sort -V | tail -1)"
+        else
+          # Anchored prefix match: "6" matches "6" or "6.x", not "60.x"
+          RESOLVED="$(echo "$JSON" | jq -r --arg v "$INPUT" \
+            '.[] | select(.name == $v or (.name | startswith($v + "."))) | .name' \
+            | sort -V | tail -1)"
+        fi
+
+        if [[ -z "$RESOLVED" ]]; then
+          echo "::error::No Swift release matches '$INPUT'"
+          exit 1
+        fi
+
+        echo "Resolved: $RESOLVED"
+        echo "version=$RESOLVED" >> "$GITHUB_OUTPUT"
+
     - name: Check existing Swift version
       id: check
       shell: bash
       run: |
-        WANTED="${{ inputs.swift-version }}"
+        WANTED="${{ steps.resolve.outputs.version }}"
         if command -v swift &>/dev/null; then
           CURRENT="$(swift --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1)"
           CURRENT_MINOR="${CURRENT%.*}"
-          # Handle x.y.z -> x.y comparison when wanted is x.y
           if [[ "$CURRENT" == "$WANTED" ]] || [[ "$CURRENT_MINOR" == "$WANTED" ]]; then
             echo "Swift $CURRENT already installed (wanted $WANTED)"
             echo "skip=true" >> $GITHUB_OUTPUT
             exit 0
-          else
-            echo "Swift $CURRENT found but $WANTED wanted — installing"
           fi
+          echo "Swift $CURRENT found but $WANTED wanted — installing"
         else
           echo "Swift not found — installing $WANTED"
         fi
@@ -39,15 +80,31 @@ runs:
       if: runner.os == 'macOS' && steps.check.outputs.skip != 'true'
       shell: bash
       run: |
-        VERSION="${{ inputs.swift-version }}"
+        set -euo pipefail
+        VERSION="${{ steps.resolve.outputs.version }}"
+        SKIP_VERIFY="${{ inputs.skip-verify-signature }}"
         PKG="swift-${VERSION}-RELEASE-osx.pkg"
         TAG="swift-${VERSION}-RELEASE"
         URL="https://download.swift.org/swift-${VERSION}-release/xcode/${TAG}/${PKG}"
         echo "Downloading ${URL}"
         curl -fLO "${URL}"
         ls -la "${PKG}"
+
+        if [[ "$SKIP_VERIFY" != "true" ]]; then
+          echo "Verifying pkg signature"
+          SIG_OUT="$(pkgutil --check-signature "${PKG}" 2>&1)"
+          echo "$SIG_OUT"
+          # Swift pkg signed by Apple: expect "signed by a developer certificate issued by Apple" or "Apple"
+          if ! echo "$SIG_OUT" | grep -qE 'Status: signed.*Apple|Developer ID Installer'; then
+            echo "::error::Unexpected pkg signature. Use skip-verify-signature: true to bypass."
+            exit 1
+          fi
+        else
+          echo "Skipping signature verification (skip-verify-signature=true)"
+        fi
+
         sudo installer -pkg "${PKG}" -target /
-        TOOLCHAIN_BIN="/Library/Developer/Toolchains/swift-${VERSION}-RELEASE.xctoolchain/usr/bin"
+        TOOLCHAIN_BIN="/Library/Developer/Toolchains/${TAG}.xctoolchain/usr/bin"
         echo "${TOOLCHAIN_BIN}" >> $GITHUB_PATH
         echo "TOOLCHAINS=swift" >> $GITHUB_ENV
 
@@ -55,25 +112,43 @@ runs:
       if: runner.os == 'Linux' && steps.check.outputs.skip != 'true'
       shell: bash
       run: |
-        VERSION="${{ inputs.swift-version }}"
+        set -euo pipefail
+        SWIFT_VERSION="${{ steps.resolve.outputs.version }}"
+        SKIP_VERIFY="${{ inputs.skip-verify-signature }}"
 
-        # Detect distro
+        # /etc/os-release sets $VERSION — don't shadow it
         . /etc/os-release
         UBUNTU_VERSION="${VERSION_ID}"
         UBUNTU_SUFFIX="ubuntu${UBUNTU_VERSION//./}"
 
-        # Install Swift runtime dependencies
         export DEBIAN_FRONTEND=noninteractive
         sudo apt-get update -q
         sudo apt-get install -y -q \
           binutils libc6-dev libcurl4-openssl-dev libedit2 \
           libgcc-s1 libpython3-dev libsqlite3-0 \
           libstdc++-13-dev libxml2-dev libz3-dev pkg-config \
-          tzdata unzip zlib1g-dev
+          tzdata unzip zlib1g-dev gnupg
 
-        # Download and extract tarball
-        TARBALL="swift-${VERSION}-RELEASE-ubuntu${UBUNTU_VERSION}.tar.gz"
-        curl -sLO "https://download.swift.org/swift-${VERSION}-release/${UBUNTU_SUFFIX}/swift-${VERSION}-RELEASE/${TARBALL}"
+        TARBALL="swift-${SWIFT_VERSION}-RELEASE-ubuntu${UBUNTU_VERSION}.tar.gz"
+        BASE="https://download.swift.org/swift-${SWIFT_VERSION}-release/${UBUNTU_SUFFIX}/swift-${SWIFT_VERSION}-RELEASE"
+        echo "Downloading ${BASE}/${TARBALL}"
+        curl -fLO "${BASE}/${TARBALL}"
+
+        if [[ "$SKIP_VERIFY" != "true" ]]; then
+          echo "Downloading signature + Swift keys"
+          curl -fLO "${BASE}/${TARBALL}.sig"
+          curl -fsSL https://swift.org/keys/all-keys.asc | gpg --import -
+          KEY_COUNT="$(gpg --list-keys --with-colons | grep -c '^pub:' || true)"
+          if [[ "$KEY_COUNT" -lt 1 ]]; then
+            echo "::error::No Swift signing keys imported"
+            exit 1
+          fi
+          echo "Verifying tarball signature"
+          gpg --verify "${TARBALL}.sig" "${TARBALL}"
+        else
+          echo "Skipping signature verification (skip-verify-signature=true)"
+        fi
+
         sudo mkdir -p /opt/swift
         sudo tar xzf "${TARBALL}" -C /opt/swift --strip-components=1
         echo "/opt/swift/usr/bin" >> $GITHUB_PATH
@@ -90,16 +165,18 @@ runs:
       if: runner.os == 'Windows' && steps.check.outputs.skip != 'true'
       shell: pwsh
       run: |
-        winget install --id Swift.Toolchain -e --source winget `
+        $version = "${{ steps.resolve.outputs.version }}"
+        # winget requires x.y.z; append .0 if only x.y
+        if ($version -match '^\d+\.\d+$') { $version = "$version.0" }
+        Write-Host "Installing Swift.Toolchain version $version"
+        winget install --id Swift.Toolchain -e --source winget --version $version `
           --accept-source-agreements --accept-package-agreements
 
-        # Refresh PATH from registry
         $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + `
                      [System.Environment]::GetEnvironmentVariable("Path","User")
         $env:Path -split ';' | Where-Object { $_ -like '*Swift*' } |
           ForEach-Object { $_ | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append }
 
-        # Locate and set Windows SDK root
         $sdk = Get-ChildItem "$env:LocalAppData\Programs\Swift\Platforms" `
                  -Recurse -Filter "Windows.sdk" -Directory -ErrorAction SilentlyContinue |
                  Select-Object -First 1
@@ -117,7 +194,7 @@ runs:
       run: |
         swift --version
         INSTALLED="$(swift --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1)"
-        WANTED="${{ inputs.swift-version }}"
+        WANTED="${{ steps.resolve.outputs.version }}"
         INSTALLED_MINOR="${INSTALLED%.*}"
         if [[ "$INSTALLED" != "$WANTED" ]] && [[ "$INSTALLED_MINOR" != "$WANTED" ]]; then
           echo "::error::Expected Swift $WANTED but got $INSTALLED"
