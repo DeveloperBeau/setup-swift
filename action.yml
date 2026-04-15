@@ -113,9 +113,10 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        VERSION="${{ steps.resolve.outputs.version }}"
+        SWIFT_VERSION="${{ steps.resolve.outputs.version }}"
         SKIP_VERIFY="${{ inputs.skip-verify-signature }}"
 
+        # /etc/os-release sets $VERSION — don't shadow it
         . /etc/os-release
         UBUNTU_VERSION="${VERSION_ID}"
         UBUNTU_SUFFIX="ubuntu${UBUNTU_VERSION//./}"
@@ -128,12 +129,9 @@ runs:
           libstdc++-13-dev libxml2-dev libz3-dev pkg-config \
           tzdata unzip zlib1g-dev gnupg
 
-        TARBALL="swift-${VERSION}-RELEASE-ubuntu${UBUNTU_VERSION}.tar.gz"
-        BASE="https://download.swift.org/swift-${VERSION}-release/${UBUNTU_SUFFIX}/swift-${VERSION}-RELEASE"
-        echo "VERSION=[$VERSION]"
-        echo "UBUNTU_VERSION=[$UBUNTU_VERSION]"
-        echo "TARBALL=[$TARBALL]"
-        echo "URL=[${BASE}/${TARBALL}]"
+        TARBALL="swift-${SWIFT_VERSION}-RELEASE-ubuntu${UBUNTU_VERSION}.tar.gz"
+        BASE="https://download.swift.org/swift-${SWIFT_VERSION}-release/${UBUNTU_SUFFIX}/swift-${SWIFT_VERSION}-RELEASE"
+        echo "Downloading ${BASE}/${TARBALL}"
         curl -fLO "${BASE}/${TARBALL}"
 
         if [[ "$SKIP_VERIFY" != "true" ]]; then
