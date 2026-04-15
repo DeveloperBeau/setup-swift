@@ -130,6 +130,10 @@ runs:
 
         TARBALL="swift-${VERSION}-RELEASE-ubuntu${UBUNTU_VERSION}.tar.gz"
         BASE="https://download.swift.org/swift-${VERSION}-release/${UBUNTU_SUFFIX}/swift-${VERSION}-RELEASE"
+        echo "VERSION=[$VERSION]"
+        echo "UBUNTU_VERSION=[$UBUNTU_VERSION]"
+        echo "TARBALL=[$TARBALL]"
+        echo "URL=[${BASE}/${TARBALL}]"
         curl -fLO "${BASE}/${TARBALL}"
 
         if [[ "$SKIP_VERIFY" != "true" ]]; then
@@ -163,7 +167,11 @@ runs:
       if: runner.os == 'Windows' && steps.check.outputs.skip != 'true'
       shell: pwsh
       run: |
-        winget install --id Swift.Toolchain -e --source winget `
+        $version = "${{ steps.resolve.outputs.version }}"
+        # winget requires x.y.z; append .0 if only x.y
+        if ($version -match '^\d+\.\d+$') { $version = "$version.0" }
+        Write-Host "Installing Swift.Toolchain version $version"
+        winget install --id Swift.Toolchain -e --source winget --version $version `
           --accept-source-agreements --accept-package-agreements
 
         $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + `
