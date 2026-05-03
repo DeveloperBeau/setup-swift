@@ -1,5 +1,5 @@
-name: 'Setup Swift'
-description: 'Install a specific Swift version on macOS, Linux, or Windows. Skips installation if the correct version is already present.'
+name: 'Resolve Swift'
+description: 'Ensure a specific Swift version is on macOS, Linux, or Windows. Skips installation if the correct version is already present.'
 
 branding:
   icon: 'download'
