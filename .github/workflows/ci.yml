@@ -54,5 +54,9 @@ jobs:
         run: |
           swift --version
           echo 'print("Hello from Swift ${{ steps.setup.outputs.version }}")' > hello.swift
-          swiftc hello.swift -o hello
-          ./hello
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            swiftc hello.swift -o hello.exe
+            ./hello.exe
+          else
+            swift hello.swift
+          fi
