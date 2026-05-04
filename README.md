@@ -1,4 +1,4 @@
-# setup-swift
+# resolve-swift
 
 A GitHub Action that installs a specific Swift version on **macOS**, **Linux**, and **Windows**.
 
