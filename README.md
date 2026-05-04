@@ -9,7 +9,7 @@ If Swift is already present at the requested version (e.g. inside a Swift Docker
 ```yaml
 steps:
   - uses: actions/checkout@v4
-  - uses: DeveloperBeau/setup-swift@v2
+  - uses: DeveloperBeau/resolve-swift@v2
     with:
       swift-version: 'latest'  # optional, defaults to 'latest'
   - run: swift build
