@@ -54,4 +54,5 @@ jobs:
         run: |
           swift --version
           echo 'print("Hello from Swift ${{ steps.setup.outputs.version }}")' > hello.swift
-          swift hello.swift
+          swiftc hello.swift -o hello
+          ./hello
