@@ -30,23 +30,46 @@ runs:
         set -euo pipefail
         INPUT="${{ inputs.swift-version }}"
 
-        # Exact x.y.z — no API call
-        if [[ "$INPUT" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-          echo "Input is exact version: $INPUT"
-          echo "version=$INPUT" >> "$GITHUB_OUTPUT"
+        # What's already on the runner?
+        CURRENT=""
+        if command -v swift &>/dev/null; then
+          CURRENT="$(swift --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1)"
+        fi
+
+        # A preinstalled toolchain satisfies the request when:
+        #   - exact (x.y.z): it equals the input, OR
+        #   - partial (x / x.y): it equals or is prefixed by "<input>."
+        # "latest" never short-circuits — it always re-resolves to the newest.
+        # Preferring a matching preinstalled toolchain avoids force-installing a
+        # newer patch (e.g. 6.3.2) when a satisfying one (e.g. 6.3.1) is present,
+        # which is both faster and dodges flaky per-platform installs.
+        satisfies() {
+          local cur="$1" want="$2"
+          [[ -n "$cur" && "$want" != "latest" ]] || return 1
+          [[ "$cur" == "$want" || "$cur" == "$want."* ]]
+        }
+
+        if satisfies "$CURRENT" "$INPUT"; then
+          echo "Preinstalled Swift $CURRENT satisfies '$INPUT' — using it"
+          echo "version=$CURRENT" >> "$GITHUB_OUTPUT"
+          echo "skip=true" >> "$GITHUB_OUTPUT"
           exit 0
         fi
 
-        echo "Resolving '$INPUT' via swift.org API"
-        JSON="$(curl -fsSL https://www.swift.org/api/v1/install/releases.json)"
-
-        if [[ "$INPUT" == "latest" ]]; then
-          RESOLVED="$(echo "$JSON" | jq -r '.[].name' | sort -V | tail -1)"
+        # Need a concrete version to install.
+        if [[ "$INPUT" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          RESOLVED="$INPUT"
         else
-          # Anchored prefix match: "6" matches "6" or "6.x", not "60.x"
-          RESOLVED="$(echo "$JSON" | jq -r --arg v "$INPUT" \
-            '.[] | select(.name == $v or (.name | startswith($v + "."))) | .name' \
-            | sort -V | tail -1)"
+          echo "Resolving '$INPUT' via swift.org API"
+          JSON="$(curl -fsSL https://www.swift.org/api/v1/install/releases.json)"
+          if [[ "$INPUT" == "latest" ]]; then
+            RESOLVED="$(echo "$JSON" | jq -r '.[].name' | sort -V | tail -1)"
+          else
+            # Anchored prefix match: "6" matches "6" or "6.x", not "60.x"
+            RESOLVED="$(echo "$JSON" | jq -r --arg v "$INPUT" \
+              '.[] | select(.name == $v or (.name | startswith($v + "."))) | .name' \
+              | sort -V | tail -1)"
+          fi
         fi
 
         if [[ -z "$RESOLVED" ]]; then
@@ -54,30 +77,20 @@ runs:
           exit 1
         fi
 
-        echo "Resolved: $RESOLVED"
-        echo "version=$RESOLVED" >> "$GITHUB_OUTPUT"
-
-    - name: Check existing Swift version
-      id: check
-      shell: bash
-      run: |
-        WANTED="${{ steps.resolve.outputs.version }}"
-        if command -v swift &>/dev/null; then
-          CURRENT="$(swift --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1)"
-          CURRENT_MINOR="${CURRENT%.*}"
-          if [[ "$CURRENT" == "$WANTED" ]] || [[ "$CURRENT_MINOR" == "$WANTED" ]]; then
-            echo "Swift $CURRENT already installed (wanted $WANTED)"
-            echo "skip=true" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-          echo "Swift $CURRENT found but $WANTED wanted — installing"
-        else
-          echo "Swift not found — installing $WANTED"
+        # Exact preinstalled match (covers the "latest" case too) — skip install.
+        if [[ -n "$CURRENT" && "$CURRENT" == "$RESOLVED" ]]; then
+          echo "Swift $CURRENT already installed (matches $RESOLVED)"
+          echo "version=$CURRENT" >> "$GITHUB_OUTPUT"
+          echo "skip=true" >> "$GITHUB_OUTPUT"
+          exit 0
         fi
-        echo "skip=false" >> $GITHUB_OUTPUT
+
+        echo "Resolved '$INPUT' -> $RESOLVED${CURRENT:+ (installed: $CURRENT)} — installing"
+        echo "version=$RESOLVED" >> "$GITHUB_OUTPUT"
+        echo "skip=false" >> "$GITHUB_OUTPUT"
 
     - name: Install Swift (macOS)
-      if: runner.os == 'macOS' && steps.check.outputs.skip != 'true'
+      if: runner.os == 'macOS' && steps.resolve.outputs.skip != 'true'
       shell: bash
       run: |
         set -euo pipefail
@@ -109,7 +122,7 @@ runs:
         echo "TOOLCHAINS=swift" >> $GITHUB_ENV
 
     - name: Install Swift (Linux)
-      if: runner.os == 'Linux' && steps.check.outputs.skip != 'true'
+      if: runner.os == 'Linux' && steps.resolve.outputs.skip != 'true'
       shell: bash
       run: |
         set -euo pipefail
@@ -154,7 +167,7 @@ runs:
         echo "/opt/swift/usr/bin" >> $GITHUB_PATH
 
     - name: Install Visual Studio components (Windows)
-      if: runner.os == 'Windows' && steps.check.outputs.skip != 'true'
+      if: runner.os == 'Windows' && steps.resolve.outputs.skip != 'true'
       shell: pwsh
       run: |
         winget install --id Microsoft.VisualStudio.2022.Community --exact --force `
@@ -162,7 +175,7 @@ runs:
           --source winget --accept-source-agreements --accept-package-agreements
 
     - name: Install Swift (Windows)
-      if: runner.os == 'Windows' && steps.check.outputs.skip != 'true'
+      if: runner.os == 'Windows' && steps.resolve.outputs.skip != 'true'
       shell: pwsh
       run: |
         $version = "${{ steps.resolve.outputs.version }}"
