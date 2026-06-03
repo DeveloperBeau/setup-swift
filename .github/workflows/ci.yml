@@ -24,7 +24,7 @@ jobs:
           - { name: Windows, runner: windows-latest, swift: '6.2.4'    }
           - { name: Windows, runner: windows-latest, swift: '6'      }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - id: setup
         uses: ./
         with:
