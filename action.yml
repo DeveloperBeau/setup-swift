@@ -149,8 +149,15 @@ runs:
 
         if [[ "$SKIP_VERIFY" != "true" ]]; then
           echo "Downloading signature + Swift keys"
-          curl -fLO "${BASE}/${TARBALL}.sig"
-          curl -fsSL https://swift.org/keys/all-keys.asc | gpg --import -
+          curl -fLO --retry 3 --retry-all-errors "${BASE}/${TARBALL}.sig"
+          # Fetch the canonical keys URL to a file (avoids a redirect + pipefail
+          # interaction that can feed gpg empty input), then import from disk.
+          curl -fsSL --retry 3 --retry-all-errors https://www.swift.org/keys/all-keys.asc -o swift-keys.asc
+          if [[ ! -s swift-keys.asc ]] || ! grep -q 'BEGIN PGP PUBLIC KEY BLOCK' swift-keys.asc; then
+            echo "::error::Swift signing keys download was empty or not a PGP key block"
+            exit 1
+          fi
+          gpg --import swift-keys.asc
           KEY_COUNT="$(gpg --list-keys --with-colons | grep -c '^pub:' || true)"
           if [[ "$KEY_COUNT" -lt 1 ]]; then
             echo "::error::No Swift signing keys imported"
